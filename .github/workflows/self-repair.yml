@@ -1,0 +1,51 @@
+name: Bounded self-repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "GitHub issue number to repair"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Diagnose
+        run: |
+          echo "Repair is intentionally bounded."
+          echo "It may propose a patch, but it cannot merge unreviewed changes."
+      - name: Run tests
+        run: pytest -q
+      - name: Create repair branch
+        if: success()
+        run: |
+          git config user.name "self-repair-bot"
+          git config user.email "actions@github.com"
+          git checkout -b repair/issue-${{ inputs.issue_number }}
+          git commit --allow-empty -m "repair: start investigation for issue #${{ inputs.issue_number }}"
+          git push origin repair/issue-${{ inputs.issue_number }}
+      - name: Open repair PR
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Repair investigation for issue #${{ inputs.issue_number }}`,
+              head: `repair/issue-${{ inputs.issue_number }}`,
+              base: "main",
+              body: "Automated repair branch. Human review is required before merge."
+            })
